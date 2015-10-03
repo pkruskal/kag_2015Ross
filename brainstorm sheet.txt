@@ -1,0 +1,20 @@
+
+Ideas
+
+- A lot of this is going to be fitting the noise in the predicted periods via multiple submissions so need to start sending test cases ASAP to explore this. 
+o Maybe some kinda rev cor to model the noise or something similar to weinerkernal analysis
+
+- Baseline will depend on day of week, general trends, promotional periods, should be able to make a quick model for this
+o For each store test day of week (DOW) effects (consider additive, or multiplicative model) 
+o For each store subtract DOW effects from an additive or multiplicative model. Then look for seasonal trends
+o On week and season rectified data. 
+* Mean subtract data by subtracting out a smoothed version of the data. 
+* Then run a simple regression tree analysis based on promotional, holiday and store prams, (with an additional term for the sliding mean of the data)
+o For prediction periods
+* Start with mean sales extrapolation based on smooth trending
+* Add DOW
+* Add regression tree variance
+- Taking other effects into account
+o How do variables effect customer sales correlation
+
+
