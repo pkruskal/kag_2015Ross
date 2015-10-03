@@ -5,14 +5,14 @@ import datetime as dt
 import re
 
 trainSet = pd.read_csv('../data/train.csv',index_col='Date',parse_dates=True)
-testSet = pd.read_csv('../data/test.csv',parse_dates=True)
+testSet = pd.read_csv('../data/test.csv',index_col='Date',parse_dates=True)
 
 
 #print an inital report of the data
-print 'training starts at ' + trainSet.Date.min()
-print 'training ends at ' + trainSet.Date.max()
-print 'predicting starts at ' + testSet.Date.min()
-print 'predicting ends at ' + testSet.Date.max()
+print 'training starts at ' + str(trainSet.index.min())
+print 'training ends at ' + str(trainSet.index.max())
+print 'predicting starts at ' + str(testSet.index.min())
+print 'predicting ends at ' + str(testSet.index.max())
 
 #extract stors
 print 'there are ' + str(len(set(trainSet['Store']))) + ' unique stores in the data set'
@@ -27,21 +27,22 @@ trainSet.boxplot('Sales','StateHoliday')
 trainSet.boxplot('Sales','SchoolHoliday')
 
 
-#create a data frame for a single store
-def plotStoresTimeSeries(trainSet):
-    storeID = 1
+#create a data frame for a single store and plot timeseres
+def plotStoresTimeSeries(trainSet,storeID,savepath = None):
+    #storeID = 1
     thisStore = trainSet[trainSet['Store'] == storeID]
 
     #set date as the index
-    thisStore = thisStore.set_index('Date')
+    #thisStore = thisStore.set_index('Date')
 
-    plt.figure()
+    plt.figure(figsize=[20,9])
     plt.subplot(3,1,1)
+    plt.title('store ' + str(storeID))
     thisStore[thisStore['Open'] == 1]['Customers'].plot()
-    plt.xlabel('Customers')
+    plt.ylabel('Customers')
     plt.subplot(3,1,2)
     thisStore[thisStore['Open'] == 1]['Sales'].plot()
-    plt.xlabel('Sales')
+    plt.ylabel('Sales')
 
     plt.subplot(3,1,3)
     thisStore.ix[thisStore['Promo'] == 1,'Promo'] = 1
@@ -54,9 +55,20 @@ def plotStoresTimeSeries(trainSet):
     thisStore.ix[thisStore['StateHoliday'] == 'a','StateHoliday'] = 3
     thisStore.ix[thisStore['StateHoliday'] == 'b','StateHoliday'] = 4
     thisStore.ix[thisStore['StateHoliday'] == 'c','StateHoliday'] = 5
-
     theseholidays = thisStore[(thisStore['Open'] == 1)]['StateHoliday']
     theseholidays.plot(style='o')
+    plt.ylim([0.5,5.5])
+    plt.ylabel('events')
+    if savepath:
+        plt.savefig(savepath,format='jpg')
+        plt.close()
+
+
+#storeNum = 3
+for storeNum in set(trainSet['Store']):
+    plotStoresTimeSeries(trainSet,storeNum,'../figures/storeTimeseries/store' + str(storeNum) + '.jpg')
+
+
 
 idx = pd.date_range(dt.datetime(2013,1,1,00,00,00),dt.datetime(2015,7,31,00,00,00),freq = 'D')
 salesMatDay1 = np.zeros([len(set(trainSet['Store'])), len(idx)])
@@ -68,7 +80,6 @@ for irow, storeID in enumerate(set(trainSet['Store'])):
 
 
 storeID = 2
-
 
 def plotStoresScatterByIndicator(trainSet):
     storeID = 1
