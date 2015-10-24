@@ -6,30 +6,192 @@ import numpy as np
 import datetime as dt
 from sklearn import preprocessing, tree
 from sklearn import ensemble
+import petersStandard as pk
+
+
+# Change catigorical variables to numberical ones
+def enumerateCatigoricals(storeSetDataFrame):
+
+    def setHolliday2Number(hollidayTag):
+        # enumerate holidays
+        holidayEnumeration = {'0':1,
+                              'a':2,
+                              'b':3,
+                              'c':4}
+        if type(hollidayTag) == str:
+            mapping = holidayEnumeration[hollidayTag]
+        else:
+            mapping = hollidayTag
+
+    #trainSet['StateHoliday'] = [holidayEnumeration[hollidayTag] if type(hollidayTag) == str else hollidayTag for hollidayTag in trainSet['StateHoliday'] ]
+    #testSet['StateHoliday'] = [holidayEnumeration[hollidayTag] if type(hollidayTag) == str else hollidayTag for hollidayTag in testSet['StateHoliday'] ]
+
+    storeSetDataFrame['StateHoliday'] = [
+        setHolliday2Number(hollidayTag) for hollidayTag in storeSetDataFrame['StateHoliday'] ]
+
+    return storeSetDataFrame
+
+# calculate the root mean squared percentage error
+def rmspeScore(y,yhat):
+    assert(len(y)==len(yhat))
+    y = np.array(y)
+    yhat = np.array(yhat)
+    diffArray = y- yhat
+    percentageError = (diffArray/y)**2
+    rmspe = np.sqrt(percentageError.sum()/len(y))
+    return rmspe
+
+# add in a collumn for a single store representing the competition distance
+def addCompetition(thisStore,thisStoresData):
+    '''
+    to add information about competition in the store we will add another column
+    that includes the distance away of the competition
+
+    To account for periods where there is no competition, the competition distance
+    is added as a "very high" number, psudo inf, well above other competition distances
+    '''
+
+
+    #initaize competition info a very high number to represent no competition
+    competitionDistancesTrain = np.ones(thisStore.shape[0])*1000000.0
+
+    #check if there even is any competition
+    if ~np.isnan(thisStoresData['CompetitionOpenSinceYear'].values):
+        #find the competition start data
+        competitionStart = dt.datetime(
+            year = thisStoresData['CompetitionOpenSinceYear'].values,
+            month = thisStoresData['CompetitionOpenSinceMonth'].values,
+            day = 1)
+        if competitionStart < thisStore.index.max():
+            competitionDist = thisStoresData['CompetitionDistance'].values[0]
+            competitionDistancesTrain[thisStore.index >= competitionStart] = competitionDist
+
+    thisStore['competition'] = competitionDistancesTrain
+    return thisStore
+
+#given a fit model, check the number of regression trees that should be used
+def crossCheckNumEstimators(fitModel,crossValProps,crossValValues,trainProp,trainValues,plots = 0,saves=0):
+
+    n_estimators = len(fitModel.estimators_)
+    test_dev = np.empty(n_estimators)
+    train_dev = np.empty(n_estimators)
+
+    for i, pred in enumerate(fitModel.staged_predict(trainProp)):
+        trainProp['SalesPredictions'] = pred
+        trainJoined = pd.merge(trainProp,trainValues,left_index=True,right_index=True)
+        train_dev[i] = rmspeScore(trainJoined['Sales'],trainJoined['SalesPredictions'])
+
+    for i, pred in enumerate(fitModel.staged_predict(crossValProps)):
+        crossValProps['SalesPredictions'] = pred
+        crossValidationJoined = pd.merge(crossValProps,crossValValues,left_index=True,right_index=True)
+        test_dev[i] = rmspeScore(crossValidationJoined['Sales'],crossValidationJoined['SalesPredictions'])
+
+    if plots:
+        plt.plot(np.arange(n_estimators)+1,train_dev)
+        plt.plot(np.arange(n_estimators)+1,test_dev,'r')
+
+    bestFit = np.min(test_dev)
+    bestNumTrees = np.argmin(test_dev)
+    return bestNumTrees, bestFit
+
+def crossValCheck(gradModel,trainSet,testPoint):
+
+    storeBoostList = []
+    storeFitList = []
+    numTreesList = []
+    modelFitList = []
+
+    for storeID in set(trainSet['Store']):
+
+        #isolate the store of interest
+        thisStore = trainSet[trainSet['Store'] == storeID].copy()
+        del thisStore['Customers']
+        del thisStore['Store']
+
+        #check if the store has enough data points
+        if thisStore.shape[0] < abs(testPoint)+200:
+            print 'not enough samples'
+            storeBoostList.append(storeID)
+            continue
+
+        #isolate the extra data for this store
+        thisStoresData = storeData[storeData['Store'] == storeID]
+
+        #first add in competition information as a new column
+        thisStore = addCompetition(thisStore,thisStoresData)
+
+        '''
+        competitionDistancesTrain = np.ones(thisStore.shape[0])*100000.0
+        #check if there is any competition
+        if ~np.isnan(thisStoresData['CompetitionOpenSinceYear'].values):
+            #find the competition start data
+            competitionStart = dt.datetime(
+                year = thisStoresData['CompetitionOpenSinceYear'].values,
+                month = thisStoresData['CompetitionOpenSinceMonth'].values,
+                day = 1)
+            if competitionStart < thisStore.index.max():
+                competitionDist = thisStoresData['CompetitionDistance'].values[0]
+                competitionDistancesTrain[thisStore.index >= competitionStart] = competitionDist
+        thisStore['competition'] = competitionDistancesTrain
+        '''
+
+        #only train on data when the store is open and sales were positive (assuming these as outliers)
+        thisStore = thisStore[thisStore['Open'] == 1]
+        del thisStore['Open']
+        thisStore = thisStore[thisStore['Sales'] > 0]
+        thisStore.sort(inplace = True)
+
+        #split the data to test and train sets for cross validation
+        trainStore = thisStore[0:testPoint]
+        crossValidationStore = thisStore[(testPoint+1):(testPoint+30)]
+
+        #take out sales data as indexed data frames
+        trainSales = pd.DataFrame(trainStore['Sales'])
+        crossValSales = pd.DataFrame(crossValidationStore['Sales'])
+        del trainStore['Sales']
+        del crossValidationStore['Sales']
+
+        #fit the model
+        gradModel.fit(trainStore,trainSales)
+
+        #cross validation check with rmspe and number of trees needed
+        numTrees, bestFit = \
+            crossCheckNumEstimators(
+            gradModel,
+            crossValidationStore.copy(),
+            crossValSales,
+            trainStore.copy(),
+            trainSales
+        )
+
+        storeFitList.append(bestFit)
+        numTreesList.append(numTrees)
+        modelFitList.append(gradModel)
+
+    #fullStoreDF = pd.concat(storeFitList)
+    #rmspe = rmspeScore(fullStoreDF['Sales'].values,fullStoreDF['SalesPredictions'].values)
+    return storeFitList, numTreesList, modelFitList
+
+
 
 trainSet = pd.read_csv('../data/train.csv',index_col='Date',parse_dates=True)
 testSet = pd.read_csv('../data/test.csv',index_col='Date',parse_dates=True)
 
 storeData =  pd.read_csv('../data/store.csv')
 
-
-#####
-# step 1 simple regress tree
-#####
+trainSet = enumerateCatigoricals(trainSet)
+testSet = enumerateCatigoricals(testSet)
 
 
-# enumerate holidays
-holidayEnumeration = {'0':1,
-                      'a':2,
-                      'b':3,
-                      'c':4}
-trainSet['StateHoliday'] = [holidayEnumeration[hollidayTag] if type(hollidayTag) == str else hollidayTag for hollidayTag in trainSet['StateHoliday'] ]
-testSet['StateHoliday'] = [holidayEnumeration[hollidayTag] if type(hollidayTag) == str else hollidayTag for hollidayTag in testSet['StateHoliday'] ]
+
+
 
 #######################
 #   paramater search  #
 #######################
 
+
+'''
 depth = 15
 #default tree
 treeModelTest = tree.DecisionTreeRegressor(max_depth=depth)
@@ -82,168 +244,26 @@ for maxDepth in np.arange(3,13)
         testPoint = np.random.randint(-100,-28)
         treeNums, estErrors = crossValCheck(gradModel,trainSet,testPoint)
 
-
-
-
-def exploreDF(data):
-    '''
-    Display a data frames data
-    '''
-    from PyQt4 import QtGui
-    datatable = QtGui.QTableWidget()
-    datatable.setColumnCount(len(data.columns))
-    datatable.setRowCount(len(data.index))
-    for i in range(len(data.index)):
-        for j in range(len(data.columns)):
-            datatable.setItem(i,j,QtGui.QTableWidgetItem(str(data.iget_value(i, j))))
-    datatable.show()
-    return datatable
+'''
 
 
 
 
-def rmspeScore(y,yhat):
-    assert(len(y)==len(yhat))
-    y = np.array(y)
-    yhat = np.array(yhat)
-    diffArray = y- yhat
-    percentageError = (diffArray/y)**2
-    rmspe = np.sqrt(percentageError.sum()/len(y))
-    return rmspe
+'''
+gridSearch._fit_and_score(estimator, X, y, scorer, train, test, verbose, parameters, fit_params, return_train_score=False, return_parameters=False, error_score='raise')
+looks like it does cross validation for you but maybe not?
 
-def addCompetition(thisStore,thisStoresData):
-    #initaized competition info a very high number to represent no competition
-    competitionDistancesTrain = np.ones(thisStore.shape[0])*1000000.0
-    #check if there is any competition
-    if ~np.isnan(thisStoresData['CompetitionOpenSinceYear'].values):
-        #find the competition start data
-        competitionStart = dt.datetime(
-            year = thisStoresData['CompetitionOpenSinceYear'].values,
-            month = thisStoresData['CompetitionOpenSinceMonth'].values,
-            day = 1)
-        if competitionStart < thisStore.index.max():
-            competitionDist = thisStoresData['CompetitionDistance'].values[0]
-            competitionDistancesTrain[thisStore.index >= competitionStart] = competitionDist
-    thisStore['competition'] = competitionDistancesTrain
-    return thisStore
+just making the paramater search simple
+params = {'a' : [1,4,6],'b' : ['a','g','s'],'c' : [True,False]}
+aSearch = gridSearch.ParameterGrid(params)
+seachList = list(aSearch)
 
-def crossValCheck(gradModel,trainSet,testPoint):
-    storeBoostList= []
-    storeFitList = []
-    numTreesList = []
-    for storeID in set(trainSet['Store']):
-
-        #isolate the store of interest
-        thisStore = trainSet[trainSet['Store'] == storeID].copy()
-        del thisStore['Customers']
-        del thisStore['Store']
-
-        #check if the store has enough data points
-        if thisStore.shape[0] < abs(testPoint)+200:
-            print 'not enough samples'
-            storeBoostList.append(storeID)
-            continue
+Note multi processing tool
+pool = multiprocessing.Pool(4)
+out1, out2, out3 = zip(*pool.map(calc_stuff, range(0, 10 * offset, offset)))
+'''
 
 
-        #add in a fields from storeData table
-        thisStoresData = storeData[storeData['Store'] == storeID]
-
-        #first add in competition information as a new column
-
-        #initaized competition info a very high number to represent no competition
-        thisStore = addCompetition(thisStore,thisStoresData)
-        '''
-        competitionDistancesTrain = np.ones(thisStore.shape[0])*100000.0
-        #check if there is any competition
-        if ~np.isnan(thisStoresData['CompetitionOpenSinceYear'].values):
-            #find the competition start data
-            competitionStart = dt.datetime(
-                year = thisStoresData['CompetitionOpenSinceYear'].values,
-                month = thisStoresData['CompetitionOpenSinceMonth'].values,
-                day = 1)
-            if competitionStart < thisStore.index.max():
-                competitionDist = thisStoresData['CompetitionDistance'].values[0]
-                competitionDistancesTrain[thisStore.index >= competitionStart] = competitionDist
-        thisStore['competition'] = competitionDistancesTrain
-        '''
-
-        #only train on data when the store is open and sales were positive (assuming some errors)
-        thisStore = thisStore[thisStore['Open'] == 1]
-        del thisStore['Open']
-        thisStore = thisStore[thisStore['Sales'] > 0]
-        thisStore.sort(inplace = True)
-
-        trainStore = thisStore[0:testPoint]
-        crossValidationStore = thisStore[(testPoint+1):(testPoint+30)]
-
-        trainSales = pd.DataFrame(trainStore['Sales'])
-        crossValSales = pd.DataFrame(crossValidationStore['Sales'])
-        del trainStore['Sales']
-        del crossValidationStore['Sales']
-
-        gradModel.fit(trainStore,trainSales)
-
-        '''
-        gridSearch._fit_and_score(estimator, X, y, scorer, train, test, verbose, parameters, fit_params, return_train_score=False, return_parameters=False, error_score='raise')
-        looks like it does cross validation for you but maybe not?
-
-        just making the paramater search simple
-        params = {'a' : [1,4,6],'b' : ['a','g','s'],'c' : [True,False]}
-        aSearch = gridSearch.ParameterGrid(params)
-        seachList = list(aSearch)
-
-        Note multi processing tool
-        pool = multiprocessing.Pool(4)
-        out1, out2, out3 = zip(*pool.map(calc_stuff, range(0, 10 * offset, offset)))
-        '''
-
-        predSales = gradModel.predict(crossValidationStore)
-        mspe = rmspeScore(crossValSales,predSales)
-
-        crossValidationStore['SalesPredictions'] = predSalesCrossChecked
-
-        numTrees, predSalesCrossChecked = \
-            crossCheckNumEstimators(
-            gradModel,
-            crossValidationStore.copy(),
-            crossValSales,
-            trainStore.copy(),
-            trainSales
-        )
-
-        crossValidationJoined = pd.merge(crossValidationStore,crossValSales,left_index=True,right_index=True)
-
-        storeFitList.append(crossValidationJoined)
-        modelFitList.append(gradModel)
-
-    fullStoreDF = pd.concat(storeFitList)
-    rmspe = rmspeScore(fullStoreDF['Sales'].values,fullStoreDF['SalesPredictions'].values)
-    return numTreesList, rmspe
-
-def crossCheckNumEstimators(fitModel,crossValProps,crossValValues,trainProp,trainValues):
-    plots = 1
-
-    n_estimators = len(fitModel.estimators_)
-    test_dev = np.empty(n_estimators)
-    train_dev = np.empty(n_estimators)
-
-    for i, pred in enumerate(fitModel.staged_predict(trainProp)):
-        trainProp['SalesPredictions'] = pred
-        trainJoined = pd.merge(trainProp,trainValues,left_index=True,right_index=True)
-        train_dev[i] = rmspeScore(trainJoined['Sales'],trainJoined['SalesPredictions'])
-
-    for i, pred in enumerate(fitModel.staged_predict(crossValProps)):
-        crossValProps['SalesPredictions'] = pred
-        crossValidationJoined = pd.merge(crossValProps,crossValValues,left_index=True,right_index=True)
-        test_dev[i] = rmspeScore(crossValidationJoined['Sales'],crossValidationJoined['SalesPredictions'])
-
-    if plots:
-        plt.plot(np.arange(n_estimators)+1,train_dev)
-        plt.plot(np.arange(n_estimators)+1,test_dev,'r')
-
-    bestFit = np.min(test_dev)
-    bestNumTrees = np.argmin(test_dev)
-    return bestNumTrees, bestFit
 
 
 
@@ -325,7 +345,3 @@ outputDF = outputDF.set_index('Id')
 del outputDF['index']
 outputDF.sort(inplace = True)
 outputDF.to_csv('D:/rossmann/petersTestEnsambleTree2.csv')
-
-######
-#
-#####
