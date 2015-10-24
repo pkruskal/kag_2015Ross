@@ -3,10 +3,12 @@ import matplotlib.pylab as plt
 import numpy as np
 import datetime as dt
 import re
+import scipy.signal as sig
 
 trainSet = pd.read_csv('../data/train.csv',index_col='Date',parse_dates=True)
 testSet = pd.read_csv('../data/test.csv',index_col='Date',parse_dates=True)
 
+storeData =  pd.read_csv('../data/store.csv')
 
 #print an inital report of the data
 print 'training starts at ' + str(trainSet.index.min())
@@ -14,7 +16,7 @@ print 'training ends at ' + str(trainSet.index.max())
 print 'predicting starts at ' + str(testSet.index.min())
 print 'predicting ends at ' + str(testSet.index.max())
 
-#extract stors
+#extract stores
 print 'there are ' + str(len(set(trainSet['Store']))) + ' unique stores in the data set'
 
 print 'the general structure and stats of the data '
@@ -28,20 +30,28 @@ trainSet.boxplot('Sales','SchoolHoliday')
 
 
 #create a data frame for a single store and plot timeseres
-def plotStoresTimeSeries(trainSet,storeID,savepath = None):
-    #storeID = 1
+def plotStoresTimeSeries(trainSet,storeData,storeID,savepath = None):
+    #storeID = 3
     thisStore = trainSet[trainSet['Store'] == storeID]
 
     #set date as the index
     #thisStore = thisStore.set_index('Date')
 
-    plt.figure(figsize=[20,9])
     plt.subplot(3,1,1)
-    plt.title('store ' + str(storeID))
-    thisStore[thisStore['Open'] == 1]['Customers'].plot()
+    plt.title('store ' + str(storeID) + ' competitionDistance ' + str(storeData[storeData['Store'] == storeID]['CompetitionDistance'].values))
+    storeOpen = thisStore[thisStore['Open'] == 1]
+    storeOpen['Customers'].plot()
+    if ~np.isnan(storeData[storeData['Store']==storeID]['CompetitionOpenSinceYear'].values):
+        competitionStart = dt.datetime(storeData[storeData['Store']==storeID]['CompetitionOpenSinceYear'].values,storeData[storeData['Store']==storeID]['CompetitionOpenSinceMonth'].values,1)
+        if competitionStart < thisStore.index.max():
+            storeOpen[storeOpen.index >= competitionStart]['Customers'].plot()
     plt.ylabel('Customers')
+
     plt.subplot(3,1,2)
-    thisStore[thisStore['Open'] == 1]['Sales'].plot()
+    storeOpen['Sales'].plot()
+    if storeData[storeData['Store']==storeID]['Promo2'].values == 1:
+        promoStart = dt.datetime.fromordinal(dt.datetime(storeData[storeData['Store']==storeID]['Promo2SinceYear'].values,1,1).toordinal() + 7*storeData[storeData['Store']==storeID]['Promo2SinceWeek'].values)
+        storeOpen[storeOpen.index >= promoStart]['Sales'].plot()
     plt.ylabel('Sales')
 
     plt.subplot(3,1,3)
@@ -61,12 +71,123 @@ def plotStoresTimeSeries(trainSet,storeID,savepath = None):
     plt.ylabel('events')
     if savepath:
         plt.savefig(savepath,format='jpg')
-        plt.close()
+        plt.clf()
 
 
-#storeNum = 3
+def plotStoreDailyTrends(trainSet,storeData,storeID,savepath = None):
+
+    thisStore = trainSet[trainSet['Store'] == storeID]
+    thisStore = thisStore[thisStore['Open'] == 1]
+
+    plt.figure()
+    plt.violinplot(
+        [thisStore[thisStore['DayOfWeek'] == dow]['Sales'] for dow in set(thisStore['DayOfWeek'])],
+        showmeans=True)
+    plt.boxplot(
+        [thisStore[thisStore['DayOfWeek'] == dow]['Sales'] for dow in set(thisStore['DayOfWeek'])],
+        notch=1)
+    plt.xlabel('day of week')
+    plt.ylabel('sales')
+
+
+    storeCompetitionFlag = ~np.isnan(storeData[storeData['Store']==storeID]['CompetitionOpenSinceYear'].values)
+
+    if storeCompetitionFlag:
+        thisStore = thisStore
+
+    #restrict to time after competition if this includes enough time, if not maybe consider other stats
+
+
+
+#as regression tree need to define the scorer creativly
+
+# base line takes days into account
+# can take promotions into account
+# can take hollidays into account
+# can take competition into account
+# can take stor type, and or assortment type into account
+
+
+
+
+
+
+def testCompetition():
+    #to look at the changes in dail stats due to competition
+    #maybe establish some thresholds
+
+
+
+
+
+#plot time series for all the stores
+plt.figure(figsize=[20,9])
 for storeNum in set(trainSet['Store']):
-    plotStoresTimeSeries(trainSet,storeNum,'../figures/storeTimeseries/store' + str(storeNum) + '.jpg')
+    if storeNum > 688:
+
+        storeType = storeData[storeData['Store'] == storeNum]['StoreType'].values[0]
+        #a,b,c,d
+        storeAssortment = storeData[storeData['Store'] == storeNum]['Assortment'].values[0]
+        #a,b,c
+
+        print str(storeNum) + ' type ' + storeType + ' assortment ' + storeAssortment
+
+        savePath = '../figures/storeTimeseries/' + \
+                   'type_' + storeType + '_assortment_' + storeAssortment + \
+                   '/competition' + \
+                   str(storeData[storeData['Store'] == storeNum]['CompetitionDistance'].values[0].astype(int)) + \
+                   '_store' + str(storeNum) + '.jpg'
+        plotStoresTimeSeries(trainSet,storeData,storeNum,savePath)
+
+
+
+
+####
+# tests on a single store 2015-10-21
+####
+storeNum = 1108
+thisStore = trainSet[trainSet['Store'] == 1108]
+thisStore = thisStore[thisStore['Open']==1]
+storeType = storeData[storeData['Store'] == storeNum]['StoreType'].values[0]
+storeAssortment = storeData[storeData['Store'] == storeNum]['Assortment'].values[0]
+
+
+
+plt.figure()
+plt.violinplot(
+    [thisStore[thisStore['DayOfWeek'] == dow]['Sales'] for dow in set(thisStore['DayOfWeek'])],
+    showmeans=True)
+plt.boxplot(
+    [thisStore[thisStore['DayOfWeek'] == dow]['Sales'] for dow in set(thisStore['DayOfWeek'])],
+    notch=1)
+plt.xlabel('day of week')
+plt.ylabel('sales')
+
+
+promotedStore = thisStore[thisStore['Promo'] == 1]
+unpromotedStore = thisStore[thisStore['Promo'] == 0]
+plt.figure()
+plt.violinplot(
+    [promotedStore[promotedStore['DayOfWeek'] == dow]['Sales'] for dow in set(promotedStore['DayOfWeek'])],
+    showmeans=True)
+plt.violinplot(
+    [unpromotedStore[unpromotedStore['DayOfWeek'] == dow]['Sales'] for dow in set(unpromotedStore['DayOfWeek'])],
+    showmeans=True)
+plt.boxplot(
+    [promotedStore[promotedStore['DayOfWeek'] == dow]['Sales'] for dow in set(promotedStore['DayOfWeek'])],
+    notch=1)
+plt.boxplot(
+    [unpromotedStore[unpromotedStore['DayOfWeek'] == dow]['Sales'] for dow in set(unpromotedStore['DayOfWeek'])],
+    notch=1)
+plt.xlabel('day of week')
+plt.ylabel('sales')
+
+
+
+
+
+
+
 
 
 
@@ -78,6 +199,10 @@ for irow, storeID in enumerate(set(trainSet['Store'])):
     theseSales = theseSales.reindex(idx)
     salesMatDay1[irow,:] = theseSales.values
 
+dowpd = thisStore.groupby(thisStore['DayOfWeek']).count()
+dowpd = thisStore.groupby(thisStore['DayOfWeek']).std()
+
+thisStore[thisStore['DayOfWeek'] == 3]['Sales'].values[:134]-thisStore[thisStore['DayOfWeek'] == 6]['Sales'].values[:134]
 
 storeID = 2
 
@@ -127,3 +252,31 @@ groupRatedCount = trainSet.groupby(trainSet.Store).count()
 grouptedRateMean['ste'] = grouptedRateStd['Sales']/np.sqrt(groupRatedCount['Sales'])
 
 
+class Store(object):
+
+    def __init__(self,fullDataFrame,storeData,storeIndx):
+        self.storeIndx = storeIndx
+
+        self.data = fullDataFrame[fullDataFrame['Store'] == storeIndx]
+
+        '''
+        sales, customers, openFlag, promo, stateHoliday, schoolHoliday, dayOfWeek, timeStamps
+        '''
+
+        self.daysFrom2014 = [dt.datetime.toordinal(tstamp)-dt.datetime.toordinal(dt.datetime(2014,1,1)) for tstamp in fullDataFrame[fullDataFrame['Store'] == storeIndx].index]
+
+        self.storeType = storeData[storeData['Store']==storeIndx]['StoreType']
+        self.assortment = storeData[storeData['Store']==storeIndx]['Assortment']
+
+        self.promo2Flag = storeData[storeData['Store']==storeIndx]['Promo2']
+        self.promoStartWeek = storeData[storeData['Store']==storeIndx]['Promo2SinceWeek']
+        self.promoStartYear = storeData[storeData['Store']==storeIndx]['Promo2SinceYear']
+        self.promoInterval = storeData[storeData['Store']==storeIndx]['PromoInterval']
+
+        self.competitionDistance = storeData[storeData['Store']==storeIndx]['CompetitionDistance']
+        self.competitionStartMonth = storeData[storeData['Store']==storeIndx]['CompetitionOpenSinceMonth']
+        self.competitionStartYear = storeData[storeData['Store']==storeIndx]['CompetitionOpenSinceYear']
+
+        missingTime
+
+        #scipy.signal.lombscargle
