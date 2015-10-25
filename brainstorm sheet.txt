@@ -1,6 +1,25 @@
 
 Ideas
 
+2015-10-24
+
+- run grid search on simple models
+	- for now run this raw saving results for further analysis and questions
+
+- things to alter
+	- consider all stores for estimating a single store using a simple bool column as a store indicator
+	- consider all stores for estimating a single store using store id as the only store indicator
+	- add promo 2 for single months of intervals
+	- add promo 2 as different promos for different intervals (a,b,c,d etc)
+	- add a season flag (1-12 so as months really but use March as month 1)
+
+- things to look for
+	- look at time effects after subtracting current fits
+		- make this as a plotting function
+	- replot with promo 2 concepts
+		- maybe time depenent
+
+2015-10-01
 - A lot of this is going to be fitting the noise in the predicted periods via multiple submissions so need to start sending test cases ASAP to explore this. 
 o Maybe some kinda rev cor to model the noise or something similar to weinerkernal analysis
 

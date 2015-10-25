@@ -4,8 +4,10 @@ import pandas as pd
 import matplotlib.pylab as plt
 import numpy as np
 import datetime as dt
-from sklearn import preprocessing, tree
+from sklearn import tree
 from sklearn import ensemble
+import sklearn.grid_search as gridSearch
+import time
 import petersStandard as pk
 
 
@@ -22,6 +24,7 @@ def enumerateCatigoricals(storeSetDataFrame):
             mapping = holidayEnumeration[hollidayTag]
         else:
             mapping = hollidayTag
+        return mapping
 
     #trainSet['StateHoliday'] = [holidayEnumeration[hollidayTag] if type(hollidayTag) == str else hollidayTag for hollidayTag in trainSet['StateHoliday'] ]
     #testSet['StateHoliday'] = [holidayEnumeration[hollidayTag] if type(hollidayTag) == str else hollidayTag for hollidayTag in testSet['StateHoliday'] ]
@@ -32,14 +35,44 @@ def enumerateCatigoricals(storeSetDataFrame):
     return storeSetDataFrame
 
 # calculate the root mean squared percentage error
-def rmspeScore(y,yhat):
+def calcPercentErrors(y,yhat):
+    """
+
+    """
     assert(len(y)==len(yhat))
-    y = np.array(y)
-    yhat = np.array(yhat)
-    diffArray = y- yhat
-    percentageError = (diffArray/y)**2
-    rmspe = np.sqrt(percentageError.sum()/len(y))
+
+    if type(y) != np.ndarray:
+        y = np.array(y)
+
+    if type(yhat) != np.ndarray:
+        yhat = np.array(yhat)
+
+    diffArray = y - yhat
+    percentageErrors = (diffArray/y)**2
+
+    return percentageErrors
+
+def rmspeScore(percentageErrors):
+    if type(percentageErrors) != np.ndarray:
+        percentageErrors = np.array(percentageErrors)
+
+    rmspe = np.sqrt(percentageErrors.sum()/len(percentageErrors))
     return rmspe
+
+# enumerate the paramaters list
+def enumerateParams():
+    varyingParams = {
+        'max_depth' : [3,5,7,9,11],
+        'learning_rate' : [0.1,0.05,0.01]
+    }
+    aSearch = gridSearch.ParameterGrid(varyingParams)
+    seachList = list(aSearch)
+    #add in the set params
+    for param in seachList:
+        param ['n_estimators'] = 500
+        param ['min_samples_split'] = 5
+        param ['verbose'] = 0
+    return seachList
 
 # add in a collumn for a single store representing the competition distance
 def addCompetition(thisStore,thisStoresData):
@@ -74,17 +107,21 @@ def crossCheckNumEstimators(fitModel,crossValProps,crossValValues,trainProp,trai
 
     n_estimators = len(fitModel.estimators_)
     test_dev = np.empty(n_estimators)
+    test_devPercErrors = []
     train_dev = np.empty(n_estimators)
 
     for i, pred in enumerate(fitModel.staged_predict(trainProp)):
         trainProp['SalesPredictions'] = pred
         trainJoined = pd.merge(trainProp,trainValues,left_index=True,right_index=True)
-        train_dev[i] = rmspeScore(trainJoined['Sales'],trainJoined['SalesPredictions'])
+        percErrors = calcPercentErrors(trainJoined['Sales'],trainJoined['SalesPredictions'])
+        train_dev[i] = rmspeScore(percErrors)
 
     for i, pred in enumerate(fitModel.staged_predict(crossValProps)):
         crossValProps['SalesPredictions'] = pred
         crossValidationJoined = pd.merge(crossValProps,crossValValues,left_index=True,right_index=True)
-        test_dev[i] = rmspeScore(crossValidationJoined['Sales'],crossValidationJoined['SalesPredictions'])
+        percErrors = calcPercentErrors(crossValidationJoined['Sales'],crossValidationJoined['SalesPredictions'])
+        test_devPercErrors.append(percErrors)
+        test_dev[i] = rmspeScore(percErrors)
 
     if plots:
         plt.plot(np.arange(n_estimators)+1,train_dev)
@@ -92,15 +129,16 @@ def crossCheckNumEstimators(fitModel,crossValProps,crossValValues,trainProp,trai
 
     bestFit = np.min(test_dev)
     bestNumTrees = np.argmin(test_dev)
-    return bestNumTrees, bestFit
+    bestPercErrors = test_devPercErrors[np.argmin(test_dev)]
+    return bestNumTrees, bestFit, bestPercErrors
 
-def crossValCheck(gradModel,trainSet,testPoint):
+def crossValCheckParams(gradModel,trainSet,storeData,testPoint):
 
     storeBoostList = []
     storeFitList = []
     numTreesList = []
     modelFitList = []
-
+    percentageErrorsList = []
     for storeID in set(trainSet['Store']):
 
         #isolate the store of interest
@@ -143,34 +181,40 @@ def crossValCheck(gradModel,trainSet,testPoint):
 
         #split the data to test and train sets for cross validation
         trainStore = thisStore[0:testPoint]
-        crossValidationStore = thisStore[(testPoint+1):(testPoint+30)]
+        crossValidationStore = thisStore[(testPoint+1):(testPoint+31)]
 
         #take out sales data as indexed data frames
-        trainSales = pd.DataFrame(trainStore['Sales'])
-        crossValSales = pd.DataFrame(crossValidationStore['Sales'])
+        trainSalesDF = pd.DataFrame(trainStore['Sales'])
+        crossValSalesDF = pd.DataFrame(crossValidationStore['Sales'])
         del trainStore['Sales']
         del crossValidationStore['Sales']
 
         #fit the model
-        gradModel.fit(trainStore,trainSales)
+        gradModel.fit(trainStore,trainSalesDF['Sales'])
+
+
 
         #cross validation check with rmspe and number of trees needed
-        numTrees, bestFit = \
-            crossCheckNumEstimators(
+        numTrees, bestFit, bestPercErrors = crossCheckNumEstimators(
             gradModel,
             crossValidationStore.copy(),
-            crossValSales,
+            crossValSalesDF,
             trainStore.copy(),
-            trainSales
+            trainSalesDF
         )
 
         storeFitList.append(bestFit)
         numTreesList.append(numTrees)
         modelFitList.append(gradModel)
 
+        #keep track of all error
+        percentageErrorsList.extend(bestPercErrors)
+
+        print '.',
+
     #fullStoreDF = pd.concat(storeFitList)
     #rmspe = rmspeScore(fullStoreDF['Sales'].values,fullStoreDF['SalesPredictions'].values)
-    return storeFitList, numTreesList, modelFitList
+    return storeFitList, numTreesList, modelFitList, percentageErrorsList
 
 
 
@@ -181,6 +225,45 @@ storeData =  pd.read_csv('../data/store.csv')
 
 trainSet = enumerateCatigoricals(trainSet)
 testSet = enumerateCatigoricals(testSet)
+
+testPoint = np.random.randint(-100,-32)
+
+
+testPoint = -32
+iBoot = 1
+
+searchList = enumerateParams()
+
+storePramDictList = []
+collapsedParamDictList = []
+time.clock()
+for params in searchList:
+
+
+    print 'Testing paramset'
+    print params
+
+    gradModel = ensemble.GradientBoostingRegressor(**params)
+
+    storeFitList, numTreesList, modelFitList, percentageErrorsList = \
+        crossValCheckParams(gradModel,trainSet,storeData,testPoint)
+
+    #save modelFitList, numTreesList, storeFitList
+
+    for iStore, storeID in enumerate(set(trainSet['Store'])):
+        storeParams = params.copy()
+        storeParams['StoreID'] = storeID
+        storeParams['numTrees'] = numTreesList[iStore]
+        storeParams['fit'] =  storeFitList[iStore]
+        storeParams['bootID'] = iBoot
+
+        storePramDictList.append(storeParams)
+
+    params['bestFit'] = rmspeScore(percentageErrorsList)
+    collapsedParamDictList.append(params)
+
+    print 'time check ' + str(time.clock())
+
 
 
 
