@@ -12,6 +12,12 @@ Ideas
 	- add promo 2 for single months of intervals
 	- add promo 2 as different promos for different intervals (a,b,c,d etc)
 	- add a season flag (1-12 so as months really but use March as month 1)
+	- change the subsample to allow for stocastic fitting
+	- change max_features to change the search of features to split on
+	- play with max_leaf_nodes, and maybe increase depth as a trade off
+		- maybe would want this if structure is more hierarchical? probably not for this problem, but maybe NBA
+
+
 
 - things to look for
 	- look at time effects after subtracting current fits

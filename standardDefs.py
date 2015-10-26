@@ -1,5 +1,3 @@
-__author__ = 'peter'
-
 import pandas as pd
 import matplotlib.pylab as plt
 import numpy as np
@@ -8,8 +6,6 @@ from sklearn import tree
 from sklearn import ensemble
 import sklearn.grid_search as gridSearch
 import time
-import petersStandard as pk
-
 
 # Change catigorical variables to numberical ones
 def enumerateCatigoricals(storeSetDataFrame):
@@ -62,8 +58,8 @@ def rmspeScore(percentageErrors):
 # enumerate the paramaters list
 def enumerateParams():
     varyingParams = {
-        'max_depth' : [3,4,5,6,7,8,9,19,11],
-        'learning_rate' : [0.8,0.5,0.3,0.2,0.1,0.05,0.01]
+        'max_depth' : [3,5,7,9,11],
+        'learning_rate' : [0.1,0.05,0.01]
     }
     aSearch = gridSearch.ParameterGrid(varyingParams)
     seachList = list(aSearch)
@@ -216,244 +212,34 @@ def crossValCheckParams(gradModel,trainSet,storeData,testPoint):
     #rmspe = rmspeScore(fullStoreDF['Sales'].values,fullStoreDF['SalesPredictions'].values)
     return storeFitList, numTreesList, modelFitList, percentageErrorsList
 
+def addOtherStoreInfo(trainSet,storeID,thisStore):
+    '''
+    This uses other store information to predict the current stores sales, who knows, may help
 
+    :param trainSet:
+     Raw training data
+    :param storeID:
+     Current store id
+    :param thisStore:
+     Isolated store info with same columns as trainSet
+    :return: trainDataFrame:
+    same size as trainSet, but Sales for stores are always the sales from the current store
+    '''
 
-trainSet = pd.read_csv('../data/train.csv',index_col='Date',parse_dates=True)
-testSet = pd.read_csv('../data/test.csv',index_col='Date',parse_dates=True)
 
-storeData =  pd.read_csv('../data/store.csv')
+    thisStore['predictingStore'] = 1
 
-trainSet = enumerateCatigoricals(trainSet)
-testSet = enumerateCatigoricals(testSet)
+    otherStoreIDs = list(set(trainSet['Store']))
+    del otherStoreIDs[otherStoreIDs.index(storeID)]
 
-testPoint = np.random.randint(-100,-32)
+    newStoresList = [thisStore]
+    for otherStorID in otherStoreIDs:
+        otherStore = trainSet[trainSet['Store'] == otherStorID].copy()
+        otherStore['predictingStore'] = 0
+        del otherStore['Sales']
+        newStoresList.append(pd.merge(otherStore,pd.DataFrame(thisStore['Sales']),left_index = True,right_index=True))
 
+    trainDataFrame = pd.concat(newStoresList)
+    return trainDataFrame
 
-testPoint = -32
-iBoot = 1
 
-searchList = enumerateParams()
-
-storePramDictList = []
-collapsedParamDictList = []
-time.clock()
-for iParam, params in enumerate(searchList):
-    tic = time.clock()
-
-    print 'Testing paramset num ' + str(iParam) + ' out of ' + str(len(searchList))
-
-    gradModel = ensemble.GradientBoostingRegressor(**params)
-
-    storeFitList, numTreesList, modelFitList, percentageErrorsList = \
-        crossValCheckParams(gradModel,trainSet,storeData,testPoint)
-
-    #save modelFitList, numTreesList, storeFitList
-
-    for iStore, storeID in enumerate(set(trainSet['Store'])):
-        storeParams = params.copy()
-        storeParams['StoreID'] = storeID
-        storeParams['numTrees'] = numTreesList[iStore]
-        storeParams['fit'] =  storeFitList[iStore]
-        storeParams['bootID'] = iBoot
-
-        storePramDictList.append(storeParams)
-
-    params['bestFit'] = rmspeScore(percentageErrorsList)
-    collapsedParamDictList.append(params)
-
-    print params
-    print 'time check ' + str((time.clock()-tic)/60.0)
-
-
-
-
-combinedParams = pd.DataFrame(collapsedParamDictList).sort('bestFit')
-storeParams = pd.DataFrame(storePramDictList)
-
-#bestFits = storeParams.groupby(['StoreID']).max()
-
-thisStore = storeParams[storeParams['StoreID'] == 14].sort('fit')
-thisStore.ix[thisStore.index[0]]
-thisStore.head(5)
-plt.hist(thisStore['fit'].values)
-
-plots = 1
-bestStoreFits = []
-for storeID in set(trainSet['Store']):
-    thisStoreParams = storeParams[storeParams['StoreID'] == 14].sort('fit')
-    bestStoreFits.append(thisStoreParams.ix[thisStoreParams.index[0]])
-
-    params =
-    gradModel = ensemble.GradientBoostingRegressor(**params)
-    gradModel.fit(thisStore,)
-
-    #plot the fit
-    if plots:
-
-
-pd.concat(bestStoreFits)
-
-
-
-
-
-
-#######################
-#   paramater search  #
-#######################
-
-
-'''
-depth = 15
-#default tree
-treeModelTest = tree.DecisionTreeRegressor(max_depth=depth)
-
-# restrict to month for traiing and testing
-testPoint = np.random.randint(-100,-28)
-
-
-storeBoostList = []
-storeID = 1115
-for storeID in storIDs:
-    thisStore = trainSet[trainSet['Store'] == storeID]
-    thisStore = thisStore[thisStore['Open'] == 1]
-    thisStore.sort(inplace = True)
-
-    storeSales = thisStore['Sales']
-
-    del thisStore['Customers']
-    del thisStore['Sales']
-    del thisStore['Store']
-
-    if storeSales.shape[0] < abs(testPoint)+100:
-        print 'not enough samples'
-        storeBoostList.append(storeID)
-        continue
-
-    trainSales = storeSales[0:testPoint]
-    trainStoreProps = thisStore[0:testPoint]
-    crossValidationStoreProps = thisStore[(testPoint+1):(testPoint+30)]
-    crossValidationSales = storeSales[(testPoint+1):(testPoint+30)]
-
-    #default fit
-    treeModelTest.fit(trainStoreProps,trainSales)
-    pred = treeModelTest.predict(crossValidationStoreProps)
-
-    crossValidationSales.values-pred
-    plt.figure()
-    trainSales.plot()
-    plt.plot(crossValidationSales)
-    crossValidationSales.plot()
-    prectedSales = crossValidationSales.copy()
-    prectedSales[:] = pred
-    prectedSales.plot()
-
-
-
-for maxDepth in np.arange(3,13)
-    gradModel = ensemble.GradientBoostingRegressor(n_estimators=500, max_depth=3,verbose=0)
-    for iboot in np.arange(5):
-        testPoint = np.random.randint(-100,-28)
-        treeNums, estErrors = crossValCheck(gradModel,trainSet,testPoint)
-
-'''
-
-
-
-
-'''
-gridSearch._fit_and_score(estimator, X, y, scorer, train, test, verbose, parameters, fit_params, return_train_score=False, return_parameters=False, error_score='raise')
-looks like it does cross validation for you but maybe not?
-
-just making the paramater search simple
-params = {'a' : [1,4,6],'b' : ['a','g','s'],'c' : [True,False]}
-aSearch = gridSearch.ParameterGrid(params)
-seachList = list(aSearch)
-
-Note multi processing tool
-pool = multiprocessing.Pool(4)
-out1, out2, out3 = zip(*pool.map(calc_stuff, range(0, 10 * offset, offset)))
-'''
-
-
-
-
-
-
-###################################
-#   assume have good paramaters   #
-###################################
-
-
-#default tree
-depth = 15
-treeModelTest = tree.DecisionTreeRegressor(max_depth=depth)
-
-ensambleTreeModel = ensemble.GradientBoostingRegressor(n_estimators=10, max_depth=3,verbose=0)
-
-storeBoostList = []
-storeFitList = []
-storeFitList2 = []
-for storeID in set(testSet['Store']):
-    thisStore = trainSet[trainSet['Store'] == storeID].copy()
-    testStore = testSet[testSet['Store'] == storeID].copy()
-
-    competitionDistancesTrain = np.ones(thisStore.shape[0])*100000.0
-    competitionDistancesTest = np.ones(testStore.shape[0])*100000.0
-    if ~np.isnan(storeData[storeData['Store']==storeID]['CompetitionOpenSinceYear'].values):
-        competitionStart = dt.datetime(storeData[storeData['Store']==storeID]['CompetitionOpenSinceYear'].values,storeData[storeData['Store']==storeID]['CompetitionOpenSinceMonth'].values,1)
-        if competitionStart < thisStore.index.max():
-            competitionDist = storeData[storeData['Store'] == storeID]['CompetitionDistance'].values[0]
-            competitionDistancesTrain[thisStore.index >= competitionStart] = competitionDist
-            competitionDistancesTest = np.ones(testStore.shape[0])*competitionDist
-
-    thisStore['competition'] = competitionDistancesTrain
-    testStore['competition'] = competitionDistancesTest
-
-    thisStore = thisStore[thisStore['Open'] == 1]
-    thisStore.sort(inplace = True)
-    storeSales = thisStore['Sales']
-
-    storesTestID = pd.DataFrame(testStore['Id'])
-    testStore.sort(inplace = True)
-
-    testStore2 = testStore.reset_index(level = 1)
-    testStore2.set_index('Id',inplace = True)
-    del testStore2['Date']
-    del testStore2['Store']
-
-    del thisStore['Customers']
-    del thisStore['Sales']
-    del thisStore['Store']
-    del testStore['Store']
-    del testStore['Id']
-
-    if storeSales.shape[0] < 300:
-        print 'not enough samples'
-        storeBoostList.append(storeID)
-        continue
-
-    #default fit
-    treeModelTest.fit(thisStore,storeSales)
-    predSales = treeModelTest.predict(testStore[testStore['Open'] == 1])
-    predSales2 = treeModelTest.predict(testStore2[testStore2['Open'] == 1])
-
-    fullPredSales = np.zeros(storesTestID.shape[0])
-    fullPredSales[np.where(testStore['Open'] == 1)] = predSales
-    storesTestID['Sales'] = fullPredSales
-    storeFitList.append(storesTestID)
-
-    testStore2['Sales'] = 0
-    testStore2.loc[testStore2['Open'] == 1,'Sales'] = predSales2
-    testStore2 = testStore2.reset_index(level = 1)
-
-    storeFitList2.append(testStore2[['Id','Sales']])
-
-outputDF = pd.concat(storeFitList2)
-
-
-outputDF = outputDF.reset_index(1)
-outputDF = outputDF.set_index('Id')
-del outputDF['index']
-outputDF.sort(inplace = True)
-outputDF.to_csv('D:/rossmann/petersTestEnsambleTree2.csv')
