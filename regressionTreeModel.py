@@ -62,8 +62,8 @@ def rmspeScore(percentageErrors):
 # enumerate the paramaters list
 def enumerateParams():
     varyingParams = {
-        'max_depth' : [3,5,7,9,11],
-        'learning_rate' : [0.1,0.05,0.01]
+        'max_depth' : [3,4,5,6,7,8,9,19,11],
+        'learning_rate' : [0.8,0.5,0.3,0.2,0.1,0.05,0.01]
     }
     aSearch = gridSearch.ParameterGrid(varyingParams)
     seachList = list(aSearch)
@@ -237,11 +237,10 @@ searchList = enumerateParams()
 storePramDictList = []
 collapsedParamDictList = []
 time.clock()
-for params in searchList:
+for iParam, params in enumerate(searchList):
+    tic = time.clock()
 
-
-    print 'Testing paramset'
-    print params
+    print 'Testing paramset num ' + str(iParam) + ' out of ' + str(len(searchList))
 
     gradModel = ensemble.GradientBoostingRegressor(**params)
 
@@ -262,11 +261,26 @@ for params in searchList:
     params['bestFit'] = rmspeScore(percentageErrorsList)
     collapsedParamDictList.append(params)
 
-    print 'time check ' + str(time.clock())
+    print params
+    print 'time check ' + str((time.clock()-tic)/60.0)
 
 
 
 
+combinedParams = pd.DataFrame(collapsedParamDictList).sort('bestFit')
+storeParams = pd.DataFrame(storePramDictList)
+
+#bestFits = storeParams.groupby(['StoreID']).max()
+
+thisStore = storeParams[storeParams['StoreID'] == 14].sort('fit')
+thisStore.ix[thisStore.index[0]]
+thisStore.head(5)
+plt.hist(thisStore['fit'].values)
+
+bestStoreFits
+for storeID in set(trainSet['Store']):
+    thisStore = storeParams[storeParams['StoreID'] == 14].sort('fit')
+    thisStore.ix[thisStore.index[0]]
 
 
 #######################
