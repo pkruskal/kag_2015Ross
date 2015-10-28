@@ -158,21 +158,6 @@ def crossValCheckParams(gradModel,trainSet,storeData,testPoint):
         #first add in competition information as a new column
         thisStore = addCompetition(thisStore,thisStoresData)
 
-        '''
-        competitionDistancesTrain = np.ones(thisStore.shape[0])*100000.0
-        #check if there is any competition
-        if ~np.isnan(thisStoresData['CompetitionOpenSinceYear'].values):
-            #find the competition start data
-            competitionStart = dt.datetime(
-                year = thisStoresData['CompetitionOpenSinceYear'].values,
-                month = thisStoresData['CompetitionOpenSinceMonth'].values,
-                day = 1)
-            if competitionStart < thisStore.index.max():
-                competitionDist = thisStoresData['CompetitionDistance'].values[0]
-                competitionDistancesTrain[thisStore.index >= competitionStart] = competitionDist
-        thisStore['competition'] = competitionDistancesTrain
-        '''
-
         #only train on data when the store is open and sales were positive (assuming these as outliers)
         thisStore = thisStore[thisStore['Open'] == 1]
         del thisStore['Open']
@@ -215,6 +200,97 @@ def crossValCheckParams(gradModel,trainSet,storeData,testPoint):
     #fullStoreDF = pd.concat(storeFitList)
     #rmspe = rmspeScore(fullStoreDF['Sales'].values,fullStoreDF['SalesPredictions'].values)
     return storeFitList, numTreesList, modelFitList, percentageErrorsList
+
+def testBestParamaters(bestFits,trainSet,storeData,testSet,plots=0):
+
+    trainSetUpdates = trainSet.copy()
+    trainSetUpdates['predictedSales'] = 0
+
+    if plots == 1:
+        plt.figure(figsize=[20,9])
+
+    storeFitList = []
+    for storeID in list(set(testSet['Store'])):
+
+        thisParamSet = bestFits[bestFits['StoreID'] == storeID]
+
+        #isolate the extra data for this store
+        thisStoresData = storeData[storeData['Store'] == storeID]
+        trainStore = trainSet[trainSet['Store'] == storeID].copy()
+        testStore = testSet[testSet['Store'] == storeID].copy()
+
+        #first add in competition information as a new column
+        trainStore = addCompetition(trainStore,thisStoresData)
+        testStore = addCompetition(testStore,thisStoresData)
+
+        #only train when the store is open
+        trainStore = trainStore[trainStore['Open'] == 1]
+        trainStore.sort(inplace = True)
+        #only train when sales are positive, others are probable outliers
+        trainStore = trainStore[trainStore['Sales'] > 0]
+        trainStore.sort(inplace = True)
+
+
+        #get the sales for training
+        storeSales = pd.DataFrame(trainStore['Sales'])
+        del trainStore['Sales']
+
+        #set indexing by ID
+        testStore = testStore.reset_index(level = 1)
+        testStore.set_index('Id',inplace = True)
+
+        del trainStore['Customers']
+
+        del trainStore['Store']
+        del testStore['Date']
+        del testStore['Store']
+
+        #params here
+        thisParamSet['n_estimators'] = thisParamSet['numTrees']
+        fit = thisParamSet['fit'].values[0]
+        del thisParamSet['numTrees']
+        del thisParamSet['fit']
+        del thisParamSet['bootID']
+        del thisParamSet['StoreID']
+
+        paramDict = thisParamSet.to_dict('records')[0]
+        paramDict['verbose'] = paramDict['verbose'].astype(int)
+        paramDict['max_depth'] = paramDict['max_depth'].astype(int)
+        paramDict['min_samples_split'] = paramDict['min_samples_split'].astype(int)
+        paramDict['n_estimators'] = paramDict['n_estimators'].astype(int)+1
+
+        ensambleTreeModel = ensemble.GradientBoostingRegressor(**paramDict)
+        ensambleTreeModel.fit(trainStore,storeSales['Sales'])
+
+        predSales = ensambleTreeModel.predict(testStore[testStore['Open'] == 1])
+        testStore['Sales'] = 0
+        testStore.loc[testStore['Open'] == 1,'Sales'] = predSales
+        testStore = testStore.reset_index(level = 1)
+        storeFitList.append(testStore[['Id','Sales']])
+
+
+        predSalesKnown = ensambleTreeModel.predict(trainStore[trainStore['Open'] == 1])
+        storeIndicies = np.intersect1d(np.where(trainSetUpdates['Store'] == storeID), np.where([trainSetUpdates['Open'] == 1]))
+        trainSetUpdates['predictedSales'].ix[storeIndicies] = predSalesKnown
+
+        #plot predictions
+        if plots == 1:
+            plt.plot(storeSales['Sales']-predSalesKnown)
+            plt.title('fit of ' + str(fit))
+            savepath = '../figures/storeTimeseries/detrendedStores/fit' + str(int(fit*1009)) + 'store' + str(storeID) + '.jpg'
+            plt.savefig(savepath,format='jpg')
+            plt.clf()
+
+
+    outputDF = pd.concat(storeFitList)
+
+    outputDF = outputDF.reset_index(1)
+    outputDF = outputDF.set_index('Id')
+    del outputDF['index']
+    outputDF.sort(inplace = True)
+    outputDF.to_csv('E:/projects\/rossmanKaggle/petersOptEnsambleTree3.csv')
+
+    return trainSetUpdates
 
 
 
@@ -277,10 +353,37 @@ thisStore.ix[thisStore.index[0]]
 thisStore.head(5)
 plt.hist(thisStore['fit'].values)
 
-bestStoreFits
-for storeID in set(trainSet['Store']):
-    thisStore = storeParams[storeParams['StoreID'] == 14].sort('fit')
-    thisStore.ix[thisStore.index[0]]
+bestStoreFits = []
+for storeID in list(set(trainSet['Store'])):
+    thisStore = storeParams[storeParams['StoreID'] == storeID].sort('fit')
+    bestStoreFits.append(thisStore.ix[thisStore.index[0]])
+
+thisStore = storeParams[storeParams['StoreID'] == 80].sort('fit')
+plt.figure()
+plt.hist(thisStore['fit'].values,36)
+
+bestFits = pd.concat(bestStoreFits,axis=1).T
+
+plt.figure()
+plt.hist(bestFits['learning_rate'].values,8)
+plt.xlabel('learning rates')
+
+plt.figure()
+plt.hist(bestFits['numTrees'].values,500)
+plt.xlabel('numTrees')
+
+
+plt.figure()
+plt.hist(bestFits['max_depth'].values,18)
+plt.xlabel('max_depth')
+
+
+plt.figure()
+plt.hist(bestFits['fit'].values,100)
+plt.xlabel('fit')
+
+
+
 
 
 #######################
