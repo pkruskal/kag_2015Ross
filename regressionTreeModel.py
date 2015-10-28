@@ -353,6 +353,7 @@ thisStore.ix[thisStore.index[0]]
 thisStore.head(5)
 plt.hist(thisStore['fit'].values)
 
+<<<<<<< HEAD
 bestStoreFits = []
 for storeID in list(set(trainSet['Store'])):
     thisStore = storeParams[storeParams['StoreID'] == storeID].sort('fit')
@@ -382,6 +383,25 @@ plt.figure()
 plt.hist(bestFits['fit'].values,100)
 plt.xlabel('fit')
 
+=======
+plots = 1
+bestStoreFits = []
+for storeID in set(trainSet['Store']):
+    thisStoreParams = storeParams[storeParams['StoreID'] == 14].sort('fit')
+    bestStoreFits.append(thisStoreParams.ix[thisStoreParams.index[0]])
+
+    params =
+    gradModel = ensemble.GradientBoostingRegressor(**params)
+    gradModel.fit(thisStore,)
+
+    #plot the fit
+    if plots:
+
+
+pd.concat(bestStoreFits)
+
+
+>>>>>>> origin/master
 
 
 
